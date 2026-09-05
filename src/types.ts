@@ -54,4 +54,13 @@ export interface FetchOutcome {
   blocked?: boolean;
   reason?: string;
   offload?: string;
+  /** Phase D: authoritative source metadata (arXiv/PubMed/Wikipedia adapter) */
+  meta?: {
+    source: string;
+    title?: string;
+    abstract?: string;
+    authors?: string;
+    doi?: string;
+    extra?: string;
+  };
 }

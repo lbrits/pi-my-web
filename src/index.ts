@@ -11,6 +11,8 @@ const timeRangeEnum = Type.Union([
   Type.Literal("year"),
 ]);
 
+const fetchModeEnum = Type.Union([Type.Literal("overview"), Type.Literal("raw")]);
+
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "web_search",
@@ -93,8 +95,10 @@ export default function (pi: ExtensionAPI) {
     label: "Web Fetch",
     description:
       "Fetch one or more URLs as readable content: HTML via readability→markdown, PDFs via pdfjs, plain text passed through, " +
-      "images returned as image attachments. Content longer than the inline cap (~15k chars) is truncated inline and offloaded " +
-      "to a temp file — page through it with the read tool. Bot-walled sites return a structured blocked result.",
+      "images returned as image attachments. Long content (over the inline cap, ~15k chars) returns a type-aware overview — " +
+      "source metadata/abstract for arXiv/PubMed/Wikipedia, a summary section if one exists, and a section outline with line " +
+      "numbers — while the full text is offloaded to a temp file; page through it with the read tool (offset = line number). " +
+      "mode:'raw' restores the classic first-N-chars window. Bot-walled sites return a structured blocked result.",
     promptSnippet: "Fetch URL(s) as markdown (HTML/PDF/images)",
     parameters: Type.Object({
       url: Type.Optional(Type.String({ description: "URL to fetch." })),
@@ -115,6 +119,13 @@ export default function (pi: ExtensionAPI) {
           description: "Inline character cap (default 15000). Longer content is offloaded to a file.",
         }),
       ),
+      mode: Type.Optional(
+        fetchModeEnum,
+        {
+          description:
+            "'overview' (default): long content → type-aware bird's-eye view (metadata/abstract, outline with line numbers) + offloaded full text. 'raw': classic first-N-chars window.",
+        },
+      ),
     }),
     async execute(
       _toolCallId: string,
@@ -133,7 +144,8 @@ export default function (pi: ExtensionAPI) {
         }
         const cfg = loadConfig();
         const outcomes = await fetchAll(cfg.fetch, urls, { raw: params.raw, signal });
-        const text = formatFetchResults(outcomes, params.maxChars ?? cfg.fetch.maxInlineChars);
+        const mode: "overview" | "raw" = params.mode === "raw" ? "raw" : "overview";
+        const text = formatFetchResults(outcomes, params.maxChars ?? cfg.fetch.maxInlineChars, mode);
         return {
           content: [
             { type: "text" as const, text },

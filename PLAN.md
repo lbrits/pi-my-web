@@ -13,7 +13,13 @@ enum via patch" sub-clause of the pi-lazy-tools verdict (that verdict otherwise 
 - [x] `npm:pi-web-access` tools disabled via `web-search.json` (rollback-safe).
 - [x] GitHub repo `lbrits/pi-my-web` (private) + research mirror.
 - [ ] **Phase B**: `web_browse` — Playwright + Firefox (LibreWolf) wall-breaker.
-- [ ] **Phase C**: remove `npm:pi-web-access` from both `settings.json` + memory pass.
+- [x] **Phase C**: remove `npm:pi-web-access` from both `settings.json` (2026-09-05).
+      Deviation: the npm module was NOT uninstalled — it stays in
+      `~/.pi/agent/npm/node_modules` as a one-line rollback, and the
+      `web-search.json` disables were kept as rollback documentation.
+- [x] **Phase D (overview)**: type-aware bird's-eye view + source adapters
+      (arXiv, PubMed, Wikipedia) + multilingual summary-section detection
+      (2026-09-05).
 
 ## Design principles
 1. **Backend-agnostic search**: no hardcoded provider anywhere in tool schemas or
@@ -52,6 +58,7 @@ title/URL/snippet list (snippets ≤500 chars).
 | `url` / `urls` | string / string[1..5] | parallel |
 | `raw` | bool | skip readability, return raw body as text |
 | `maxChars` | int 500–100k (def 15k) | inline cap; excess → offload file |
+| `mode` | `overview`\|`raw` (def `overview`) | `overview`: long content → type-aware map, not a window. `raw`: classic first-N-chars window |
 
 Pipeline per URL:
 1. `fetch()` with browser-ish UA, redirect follow, timeout (def 30 s), hard
@@ -148,18 +155,79 @@ for both users; the agent-dir copies were restored to their original content.
 - Result shape mirrors web_fetch (same offload/wall semantics).
 
 ## Phase C — retire pi-web-access
-1. Remove `"npm:pi-web-access"` from `packages[]` in both users'
-   `~/.pi/agent/settings.json`; `npm uninstall` in each `~/.pi/agent/npm`.
-2. Delete both `web-search.json` files (or keep one week for instant rollback).
+1. ~~Remove `"npm:pi-web-access"` from `packages[]` in both users'
+   `~/.pi/agent/settings.json`; `npm uninstall` in each `~/.pi/agent/npm`.~~
+   **DONE 2026-09-05** — packages set to `[]` on both users. Deviation: module
+   intentionally NOT uninstalled (one-line rollback); `web-search.json` kept.
+2. ~~Delete both `web-search.json` files~~ — kept as rollback docs.
 3. Memory pass: MEMORY.md + daily log (supersede the "use notes_search fallback"
    line and the priv.au references).
 4. Regression: `pi-injection-audit.mjs` → expect the 4 npm tool schemas gone and
    our 2–3 present; total system prompt should shrink.
 
+## Phase D — type-aware overview ("bird's-eye view") + source adapters
+
+Goal: stop returning an arbitrary first-15k-chars window for long content.
+The full text is offloaded anyway, so the inline part becomes a **navigable
+map** instead of a dumb cut. Model-free (design principle 2 holds): structural
+extraction, not LLM summarization — the main model (the agent) still does any
+real synthesis, and can now jump straight to sections via line numbers.
+
+**When it kicks in:** only when `content.length > maxChars` (exactly where
+truncation would have happened). Short content stays fully inline as before.
+`mode:'raw'` forces the old window. If no structure is found at all, the
+formatter falls back to the raw window (degrade soft, principle 5).
+
+**Layers — first hit wins for the abstract/summary slot:**
+1. **Source adapters** (URL registry; extra GET, best-effort, 15 s timeout):
+   - `arxiv` — `arxiv.org/{abs,pdf}/<id>` (v1/v2 + old-style ids) → GET
+     `arxiv.org/abs/<id>`, linkedom-parse the citation block: title, authors
+     (`meta[citation_author]`), abstract (`blockquote.abstract`), comments,
+     journal reference, DOI, subjects.
+   - `pubmed` — `pubmed.ncbi.nlm.nih.gov/<PMID>/` → NCBI E-utilities
+     `efetch.fcgi?db=pubmed&id=<PMID>&rettype=abstract&retmode=text`
+     (keyless, 3 req/s) → clean citation+abstract block.
+   - `wikipedia` — `<lang>.wikipedia.org/wiki/<Title>` → REST
+     `api/rest_v1/page/summary/<title>` JSON (description + lead extract).
+     Non-article namespaces (Wikipedia:, Talk:, File:, …) skipped; `m.` → `en`.
+2. **Keyword summary detection** (the "grep for `# zusammenfassung`" idea):
+   markdown headings normalized + matched against ~90 multilingual keywords
+   (en/de/fr/es/it/pt/nl/sv/da/no/fi/pl/cs/sk/hu/ro/bg/ru/uk/el/tr/ja/zh/ko/hi).
+   Match = exact or keyword-as-prefix ("Summary of results"). Section text =
+   up to the next same-or-higher heading, squashed, ≤4k chars.
+3. **PDF keyword scan**: same list, word-boundary search in the first ~6k
+   chars of pdfjs text (arXiv PDFs hit "Abstract" on page 1).
+4. **Lede**: first non-heading, non-list, non-marker line ≥80 chars, ≤1.2k.
+5. **Outline**: markdown heading scan → `{level, text, line, start}` (fence-
+   aware: `#` lines inside ``` blocks are ignored). PDFs get **page markers**
+   instead: `pdfToText` now emits `[[page N]]` lines, overview lists
+   `pN→L<line>`. Line numbers feed directly into `read offset=<line>` — the
+   offloaded file is navigable, not a wall. Caps: 50 outline rows, 30 page refs.
+
+**Overview block** (replaces the window): `title/authors/journal/doi` (adapter
+metadata, or page title), `abstract/summary` (≤4k), `lede`, `outline (N)`
+with `L<line>` per entry, `pages (N)`, and a final `[full text: N chars,
+M lines → <offload path> — page with the read tool]` line. Budgeted to
+`maxChars`.
+
+**Deliberately NOT doing (yet):**
+- **LLM summarizer** — the agent already summarizes; the small-model tier
+  (5070 Ti) is the future home of *query-relevant passage extraction*
+  (`purpose` param, RAG-lite), not of summarization. Revisit only if the
+  structural overview proves thin in practice.
+- `purpose` param, cross-URL synthesis, JS-rendered pages (Phase B's job).
+
+**Schema note:** adding `mode` changes the tool schema → one prompt-cache
+re-prefill per session on first use (accepted — see pi-lazy-tools verdict;
+stable afterwards). Use the typebox-1.x array form:
+`Type.Union([…])` (variadic form produced the 09-05 `anyOf.some` crash).
+
 ## Verification
-- `node test/smoke.ts` — 16 checks (search + fetch branches + walls). Uses a
-  local HTTP server for PDF/image fixtures (remote image URLs 404/429
-  non-deterministically); HTML + search hit the real network.
+- `node test/smoke.ts` — 47 checks: Phase A (search + fetch branches + walls)
+  + Phase D (offline outline/keyword/adapter-detection units, overview
+  builder, live arXiv/PubMed/Wikipedia adapter GETs). Uses a local HTTP server
+  for PDF/image fixtures (remote image URLs 404/429 non-deterministically);
+  HTML + search hit the real network.
 - `/home/lionel/pi-injection-audit.mjs` — dump injected schemas before/after.
 - In-session: one live `web_search` call after /reload.
 
@@ -178,9 +246,12 @@ src/types.ts      shared interfaces
 src/searxng.ts    the searxng-json adapter
 src/search.ts     backend fallback, domain filter, formatting
 src/http.ts       fetch wrapper (timeout, size cap)
-src/pipeline.ts   html→markdown, pdf→text, image→base64
+src/pipeline.ts   html→markdown, pdf→text ([[page N]] markers), image→base64
 src/walls.ts      bot-wall heuristics
 src/offload.ts    temp-file offload
-src/fetcher.ts    per-URL orchestration + result formatting
+src/overview.ts   Phase D: source adapters (arxiv/pubmed/wikipedia), keyword
+                  summary detection, heading outline, overview builder
+src/fetcher.ts    per-URL orchestration + adapter pass + result formatting
+                  (mode: overview | raw)
 test/smoke.ts     node test/smoke.ts
 ```

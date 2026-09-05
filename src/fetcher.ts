@@ -3,6 +3,7 @@ import { download } from "./http.ts";
 import { detectWall } from "./walls.ts";
 import { extract } from "./pipeline.ts";
 import { offloadContent } from "./offload.ts";
+import { buildOverview, detectSource, fetchSourceMeta } from "./overview.ts";
 
 const utf8 = new TextDecoder("utf-8", { fatal: false });
 
@@ -88,10 +89,28 @@ export async function fetchAll(
       }
     }
   }
+  // Phase D: authoritative source metadata (arXiv/PubMed/Wikipedia).
+  // Extra GET per detected source, in parallel, best-effort.
+  await Promise.all(
+    outcomes.map(async (o) => {
+      if (!o.ok || !o.content) return;
+      const m = detectSource(o.finalUrl ?? o.url);
+      if (!m) return;
+      try {
+        o.meta = await fetchSourceMeta(m, cfg);
+      } catch {
+        /* adapter is best-effort */
+      }
+    }),
+  );
   return outcomes;
 }
 
-export function formatFetchResults(outcomes: FetchOutcome[], maxChars: number): string {
+export function formatFetchResults(
+  outcomes: FetchOutcome[],
+  maxChars: number,
+  mode: "overview" | "raw" = "overview",
+): string {
   const sections = outcomes.map((o) => {
     const meta = [
       o.status !== undefined ? `status=${o.status}` : null,
@@ -120,6 +139,14 @@ export function formatFetchResults(outcomes: FetchOutcome[], maxChars: number): 
 
     const content = o.content ?? "";
     const head = o.title ? `title: ${o.title}\n\n` : "";
+    if (mode === "overview" && content.length > maxChars) {
+      const ov = buildOverview(o, maxChars);
+      if (ov) {
+        lines.push(ov);
+        return lines.filter((l) => l !== "").join("\n");
+      }
+      // no structure found → fall through to the classic window
+    }
     if (content.length > maxChars) {
       lines.push(head + content.slice(0, maxChars));
       if (o.offload) {

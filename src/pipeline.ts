@@ -70,7 +70,9 @@ export async function pdfToText(bytes: Uint8Array, maxPages: number): Promise<Ex
       t += String(it.str ?? "");
       if (it.hasEOL) t += "\n";
     }
-    pages.push(t.trim());
+    // [[page N]] marker → the overview builder turns these into
+    // `pN→L<line>` jump targets for the read tool.
+    pages.push(`[[page ${i}]]\n\n${t.trim()}`);
   }
   await task.destroy();
   return { title: "", markdown: pages.join("\n\n"), kind: "text" };
