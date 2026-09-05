@@ -4,12 +4,12 @@ import { loadConfig } from "./config.ts";
 import { searchAll, formatSearchResults } from "./search.ts";
 import { fetchAll, formatFetchResults } from "./fetcher.ts";
 
-const timeRangeEnum = Type.Union(
+const timeRangeEnum = Type.Union([
   Type.Literal("day"),
   Type.Literal("week"),
   Type.Literal("month"),
   Type.Literal("year"),
-);
+]);
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
@@ -32,10 +32,7 @@ export default function (pi: ExtensionAPI) {
       numResults: Type.Optional(
         Type.Integer({ minimum: 1, maximum: 20, description: "Results per query (default 5)." }),
       ),
-      timeRange: Type.Optional(
-        timeRangeEnum as any,
-        { description: "Recency filter." },
-      ) as any,
+      timeRange: Type.Optional(timeRangeEnum, { description: "Recency filter." }),
       domainFilter: Type.Optional(
         Type.Array(Type.String(), {
           description: "Restrict to these domains/hosts; prefix '-' to exclude a domain.",
