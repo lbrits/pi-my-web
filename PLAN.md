@@ -127,6 +127,15 @@ loaded. Resolved without renaming: `web-search.json` now sets
 (the package natively supports per-tool enable flags). Phase C removes the
 package outright.
 
+**Config-path trap (found 2026-09-05 during deployment):** the installed
+pi-web-access (v0.27.0) reads its config from
+`$PI_CODING_AGENT_DIR/web-search.json` → `$XDG_CONFIG_HOME/pi/web-search.json`
+→ `~/.pi/web-search.json`. Neither env var is set in real sessions, so the
+effective file is **`~/.pi/web-search.json`** — the files under
+`~/.pi/agent/web-search.json` (priv.au) are OLD-location leftovers that the
+current package never reads. The disables were written to `~/.pi/web-search.json`
+for both users; the agent-dir copies were restored to their original content.
+
 ## Phase B — web_browse (wall-breaker)
 - `npm i playwright` (browsers: use installed LibreWolf/stock Firefox via
   `firefox.launch({ executablePath })` — no playwright browser download).
