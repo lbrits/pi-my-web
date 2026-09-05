@@ -18,9 +18,8 @@ export default function (pi: ExtensionAPI) {
     name: "web_search",
     label: "Web Search",
     description:
-      "Search the web (SearXNG; backends from config are tried in order with automatic fallback). " +
-      "Give 1-4 queries (parallel); per-query numResults (default 5); optional timeRange (day/week/month/year) " +
-      "and domainFilter (prefix '-' to exclude a domain). Returns titles, URLs and snippets — use web_fetch to read a page.",
+      "Search the web (SearXNG; backends from config). Prefer 1-4 parallel varied queries. " +
+      "Returns titles/URLs/snippets — use web_fetch to read a page.",
     promptSnippet: "Search the web (SearXNG)",
     parameters: Type.Object({
       query: Type.Optional(Type.String({ description: "A single search query." })),
@@ -94,11 +93,10 @@ export default function (pi: ExtensionAPI) {
     name: "web_fetch",
     label: "Web Fetch",
     description:
-      "Fetch one or more URLs as readable content: HTML via readability→markdown, PDFs via pdfjs, plain text passed through, " +
-      "images returned as image attachments. Long content (over the inline cap, ~15k chars) returns a type-aware overview — " +
-      "source metadata/abstract for arXiv/PubMed/Wikipedia, a summary section if one exists, and a section outline with line " +
-      "numbers — while the full text is offloaded to a temp file; page through it with the read tool (offset = line number). " +
-      "mode:'raw' restores the classic first-N-chars window. Bot-walled sites return a structured blocked result.",
+      "Fetch URL(s) as readable content (HTML→markdown, PDFs, images as attachments). Long content returns a type-aware " +
+      "overview (metadata/abstract for arXiv/PubMed/Wikipedia, section outline with line numbers) with full text offloaded " +
+      "to a temp file — page it with the read tool (offset = line number). mode:'raw' = first-N-chars window. " +
+      "Bot-walled sites return a blocked result.",
     promptSnippet: "Fetch URL(s) as markdown (HTML/PDF/images)",
     parameters: Type.Object({
       url: Type.Optional(Type.String({ description: "URL to fetch." })),
@@ -116,14 +114,14 @@ export default function (pi: ExtensionAPI) {
         Type.Integer({
           minimum: 500,
           maximum: 100000,
-          description: "Inline character cap (default 15000). Longer content is offloaded to a file.",
+          description: "Inline character cap (default 15000).",
         }),
       ),
       mode: Type.Optional(
         fetchModeEnum,
         {
           description:
-            "'overview' (default): long content → type-aware bird's-eye view (metadata/abstract, outline with line numbers) + offloaded full text. 'raw': classic first-N-chars window.",
+            "'overview' (default, type-aware bird's-eye view + offloaded full text) or 'raw' (first-N-chars window).",
         },
       ),
     }),
