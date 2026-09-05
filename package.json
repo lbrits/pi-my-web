@@ -1,0 +1,22 @@
+{
+  "name": "pi-my-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Slim web-access extension for pi: SearXNG-backed web_search + readability web_fetch (replaces npm:pi-web-access)",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "smoke": "node test/smoke.ts"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "linkedom": "^0.18.13",
+    "pdfjs-dist": "^6.3.289",
+    "turndown": "^7.2.4",
+    "typebox": "1.3.7"
+  }
+}
