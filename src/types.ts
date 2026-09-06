@@ -20,9 +20,21 @@ export interface FetchConfig {
   offloadDir: string | null;
 }
 
+export interface BrowseConfig {
+  /** null → default per-user profile dir (~/.pi/agent/pi-my-web-browse) */
+  profileDir: string | null;
+  /** per-navigation timeout */
+  timeoutMs: number;
+  /** stage-2 visible-window wait for the user to clear a challenge; 0 = headless only */
+  visiblePollMs: number;
+  viewportWidth: number;
+  viewportHeight: number;
+}
+
 export interface PiMyWebConfig {
   search: SearchConfig;
   fetch: FetchConfig;
+  browse: BrowseConfig;
 }
 
 export interface SearchResult {

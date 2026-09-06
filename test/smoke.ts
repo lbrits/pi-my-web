@@ -67,8 +67,20 @@ try {
 } catch { /* keep 1px */ }
 localFiles["/test.png"] = { path: "-", type: "image/png" };
 
+// short challenge-looking page for the browse wall test (detectWall requires <4 KB)
+const localPages: Record<string, string> = {
+  "/wall":
+    "<html><head><title>Checking</title></head><body><h1>Just a moment...</h1><p>Checking your browser before accessing.</p></body></html>",
+};
+
 const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-  const f = localFiles[req.url ?? ""];
+  const u = req.url ?? "";
+  if (localPages[u]) {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(localPages[u]);
+    return;
+  }
+  const f = localFiles[u];
   if (!f) { res.writeHead(404); res.end("nope"); return; }
   const body = f.path === "-" ? png : await readFile(f.path);
   res.writeHead(200, { "content-type": f.type, "content-length": String(body.length) });
@@ -124,6 +136,29 @@ if (localFiles["/car.pdf"]) {
     check("fetch size cap: >10MB rejected", o.ok === false && /exceeds/.test(o.reason ?? ""), o.reason);
   }
 }
+
+// --- browse (Phase B) ---
+{
+  const { browse } = await import("../src/browse.ts");
+  const bcfg = {
+    ...cfg,
+    browse: { ...cfg.browse, profileDir: join(homedir(), ".pi", "agent", "pi-my-web-browse-test"), visiblePollMs: 0 },
+  };
+  // note: example.com does NOT resolve via this box's LAN DNS — use wikipedia
+  const o1 = await browse(bcfg, "https://en.wikipedia.org/wiki/Markdown", {});
+  check(
+    "browse: headless wikipedia ok",
+    o1.ok === true && o1.kind === "markdown" && (o1.content?.length ?? 0) > 50,
+    `status=${o1.status} stage=${o1.stage} title=${o1.title ?? "?"} chars=${o1.content?.length} reason=${o1.reason ?? ""}`,
+  );
+  const o2 = await browse(bcfg, `http://127.0.0.1:${lport}/wall`, {});
+  check(
+    "browse: wall headless → blocked, no visible fallback",
+    o2.ok === false && o2.blocked === true && o2.stage === 1 && /no visible fallback/.test(o2.reason ?? ""),
+    o2.reason,
+  );
+}
+
 server.close();
 
 // --- walls (synthetic) ---

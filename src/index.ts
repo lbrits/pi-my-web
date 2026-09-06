@@ -3,6 +3,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.ts";
 import { searchAll, formatSearchResults } from "./search.ts";
 import { fetchAll, formatFetchResults } from "./fetcher.ts";
+import { browse } from "./browse.ts";
 
 const timeRangeEnum = Type.Union([
   Type.Literal("day"),
@@ -173,6 +174,73 @@ export default function (pi: ExtensionAPI) {
             {
               type: "text" as const,
               text: `web_fetch error: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+          details: { error: String(err) },
+        };
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "web_browse",
+    label: "Web Browse",
+    description:
+      "Browse a URL in a real Firefox (Playwright, persistent profile). Use when web_fetch returns " +
+      "BLOCKED (bot wall / JS-required). If a challenge persists, a visible window opens and waits " +
+      "up to 2 min for the user to clear it. Same result shape as web_fetch.",
+    promptSnippet: "Browse URL in real Firefox (wall-breaker)",
+    parameters: Type.Object({
+      url: Type.String({ description: "URL to browse in a real browser." }),
+      raw: Type.Optional(
+        Type.Boolean({ description: "Skip readability extraction; return rendered HTML as text." }),
+      ),
+      maxChars: Type.Optional(
+        Type.Integer({ minimum: 500, maximum: 100000, description: "Inline character cap (default 15000)." }),
+      ),
+      mode: Type.Optional(
+        fetchModeEnum,
+        { description: "'overview' (default) or 'raw' (first-N-chars window)." },
+      ),
+    }),
+    async execute(
+      _toolCallId: string,
+      params: any,
+      signal: AbortSignal | undefined,
+      _onUpdate?: unknown,
+      _ctx?: unknown,
+    ) {
+      try {
+        if (!params.url) {
+          return {
+            content: [{ type: "text" as const, text: "web_browse: provide `url`." }],
+            details: { error: "missing url" },
+          };
+        }
+        const cfg = loadConfig();
+        const o = await browse(cfg, params.url, { raw: params.raw === true, signal });
+        const mode: "overview" | "raw" = params.mode === "raw" ? "raw" : "overview";
+        const text = formatFetchResults([o], params.maxChars ?? cfg.fetch.maxInlineChars, mode);
+        return {
+          content: [{ type: "text" as const, text }],
+          details: {
+            url: o.url,
+            ok: o.ok,
+            status: o.status,
+            blocked: o.blocked,
+            kind: o.kind,
+            stage: o.stage,
+            challengeCleared: o.challengeCleared,
+            offload: o.offload,
+            chars: o.content?.length,
+          },
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `web_browse error: ${err instanceof Error ? err.message : String(err)}`,
             },
           ],
           details: { error: String(err) },

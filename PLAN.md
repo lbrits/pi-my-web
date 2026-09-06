@@ -12,7 +12,12 @@ enum via patch" sub-clause of the pi-lazy-tools verdict (that verdict otherwise 
 - [x] Deployment to lionel instance (symlink + smoke audit).
 - [x] `npm:pi-web-access` tools disabled via `web-search.json` (rollback-safe).
 - [x] GitHub repo `lbrits/pi-my-web` (private) + research mirror.
-- [ ] **Phase B**: `web_browse` — Playwright + Firefox (LibreWolf) wall-breaker.
+- [x] **Phase B (wall-breaker)**: `web_browse` — Playwright + real Firefox (2026-09-06).
+      Deviation from original plan: LibreWolf/stock Firefox **cannot** be driven —
+      Playwright's Firefox relies on the Juggler patch baked into its own build
+      (docs: "Playwright doesn't work with the branded version of Firefox").
+      Used `playwright-core` (zero runtime deps) + `npx playwright-core install
+      firefox` (one-time 109.5 MB download per user, `~/.cache/ms-playwright/`).
 - [x] **Phase C**: remove `npm:pi-web-access` from both `settings.json` (2026-09-05).
       Deviation: the npm module was NOT uninstalled — it stays in
       `~/.pi/agent/npm/node_modules` as a one-line rollback, and the
@@ -104,6 +109,13 @@ Built-in defaults deep-merged with `~/.pi/agent/pi-my-web.json`
     "maxPdfPages": 100,
     "offloadMinChars": 2000,
     "offloadDir": "/tmp/pi-my-web"
+  },
+  "browse": {
+    "profileDir": null,
+    "timeoutMs": 45000,
+    "visiblePollMs": 120000,
+    "viewportWidth": 1366,
+    "viewportHeight": 900
   }
 }
 ```
@@ -143,16 +155,31 @@ effective file is **`~/.pi/web-search.json`** — the files under
 current package never reads. The disables were written to `~/.pi/web-search.json`
 for both users; the agent-dir copies were restored to their original content.
 
-## Phase B — web_browse (wall-breaker)
-- `npm i playwright` (browsers: use installed LibreWolf/stock Firefox via
-  `firefox.launch({ executablePath })` — no playwright browser download).
-- Persistent profile dir per user (cookies survive → many walls clear on
-  retry after the first manual clear).
-- Two-stage: (1) headless fetch with saved profile; if wall detected →
-  (2) relaunch with a **visible window**, time-boxed poll (e.g. 120 s) for the
-  user to clear the challenge, then `page.content()` through the same
-  readability pipeline as web_fetch.
-- Result shape mirrors web_fetch (same offload/wall semantics).
+## Phase B — web_browse (wall-breaker) — DONE 2026-09-06
+- **Browser**: Playwright's own Firefox (Juggler-patched build; stock/
+  LibreWolf Firefox can't be driven — Playwright requires its baked-in patch,
+  unlike Chromium where CDP is a stable standard protocol). Installed once
+  per user: `npx playwright-core install firefox` →
+  `~/.cache/ms-playwright/firefox-1543`. `playwright-core` (not `playwright`)
+  = zero runtime deps, no postinstall browser download.
+- `firefox.launchPersistentContext(profileDir, { headless })`; profile
+  defaults to `~/.pi/agent/pi-my-web-browse` (config `browse.profileDir`
+  overrides). Cookies survive → many walls clear on retry after the first
+  manual clear.
+- Two-stage: (1) headless `goto` (timeout `browse.timeoutMs`, default 45 s;
+  best-effort `networkidle` 5 s) → wall check; (2) if a **2xx challenge page**
+  persists and `browse.visiblePollMs` > 0 (default 120 s): relaunch **visible**
+  (stage-1 context fully closed first — profile lock) and poll every 2 s, 
+  re-reading the DOM (user may have solved it and navigated on), until the
+  wall clears, the window is closed, or the deadline hits.
+  4xx/5xx never escalate (a visible window won't help). `visiblePollMs: 0`
+  = headless-only mode.
+- `page.content()` → same `htmlToMarkdown` pipeline as web_fetch; result
+  shape = `FetchOutcome` (same offload + source-adapter post-processing,
+  same `formatFetchResults` rendering). Extras: `stage` (1|2) and
+  `challengeCleared` in the tool result details.
+- No vision involved: text extraction only; the user clears any captcha by
+  looking at the visible window themselves (agent just polls the DOM).
 
 ## Phase C — retire pi-web-access
 1. ~~Remove `"npm:pi-web-access"` from `packages[]` in both users'
@@ -223,11 +250,13 @@ stable afterwards). Use the typebox-1.x array form:
 `Type.Union([…])` (variadic form produced the 09-05 `anyOf.some` crash).
 
 ## Verification
-- `node test/smoke.ts` — 47 checks: Phase A (search + fetch branches + walls)
-  + Phase D (offline outline/keyword/adapter-detection units, overview
-  builder, live arXiv/PubMed/Wikipedia adapter GETs). Uses a local HTTP server
-  for PDF/image fixtures (remote image URLs 404/429 non-deterministically);
-  HTML + search hit the real network.
+- `node test/smoke.ts` — 49 checks: Phase A (search + fetch branches + walls)
+  + Phase B (live headless browse; wall + visiblePollMs=0 → blocked) + Phase D
+  (offline outline/keyword/adapter-detection units, overview builder, live
+  arXiv/PubMed/Wikipedia adapter GETs). Uses a local HTTP server for
+  PDF/image/wall fixtures (remote image URLs 404/429 non-deterministically);
+  HTML + search hit the real network. Note: this box's LAN DNS cannot resolve
+  example.com — browse test uses en.wikipedia.org.
 - `/home/lionel/pi-injection-audit.mjs` — dump injected schemas before/after.
 - In-session: one live `web_search` call after /reload.
 
@@ -248,6 +277,7 @@ src/search.ts     backend fallback, domain filter, formatting
 src/http.ts       fetch wrapper (timeout, size cap)
 src/pipeline.ts   html→markdown, pdf→text ([[page N]] markers), image→base64
 src/walls.ts      bot-wall heuristics
+src/browse.ts     Phase B: two-stage Playwright Firefox browse (wall-breaker)
 src/offload.ts    temp-file offload
 src/overview.ts   Phase D: source adapters (arxiv/pubmed/wikipedia), keyword
                   summary detection, heading outline, overview builder

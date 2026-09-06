@@ -24,6 +24,13 @@ const DEFAULT_CONFIG: PiMyWebConfig = {
     offloadMinChars: 2000,
     offloadDir: join(tmpdir(), "pi-my-web"),
   },
+  browse: {
+    profileDir: null,
+    timeoutMs: 45000,
+    visiblePollMs: 120000,
+    viewportWidth: 1366,
+    viewportHeight: 900,
+  },
 };
 
 function isObj(v: unknown): v is Record<string, unknown> {
