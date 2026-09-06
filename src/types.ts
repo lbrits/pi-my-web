@@ -66,6 +66,8 @@ export interface FetchOutcome {
   blocked?: boolean;
   reason?: string;
   offload?: string;
+  /** URL of the interstitial page a site adapter auto-followed from */
+  followedFrom?: string;
   /** Phase D: authoritative source metadata (arXiv/PubMed/Wikipedia adapter) */
   meta?: {
     source: string;

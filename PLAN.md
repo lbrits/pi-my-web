@@ -5,7 +5,7 @@ Custom slim web-access extension for pi. Replaces the `npm:pi-web-access` packag
 slim web kit, retire pi-web-access" (lionel daily log) and supersedes the "trim provider
 enum via patch" sub-clause of the pi-lazy-tools verdict (that verdict otherwise stands).
 
-## Status — 2026-09-05
+## Status — 2026-09-06
 - [x] **Phase A (core)**: `web_search` + `web_fetch` implemented, smoke test green
       (16/16 checks: search, HTML→markdown, PDF→text, image→attachment, size cap,
       404 shape, wall detection).
@@ -25,6 +25,17 @@ enum via patch" sub-clause of the pi-lazy-tools verdict (that verdict otherwise 
 - [x] **Phase D (overview)**: type-aware bird's-eye view + source adapters
       (arXiv, PubMed, Wikipedia) + multilingual summary-section detection
       (2026-09-05).
+- [x] **walls fix**: `detectWall` blind spot — AltCHA-style challenge pages
+      (sci-hub.ru) ship ~12 KB of raw HTML from inline CSS/JS, busting the
+      4000-char gate before the "are you a robot" pattern ran. Fix: strip
+      `<style>`/`<script>` in `withoutAssets()` before the gate (2026-09-06).
+- [x] **Phase E (site adapters)**: `src/adapters/` — one little .ts per site;
+      the fetcher auto-follows interstitial pages to the real document.
+      First adapter: **sci-hub** (paper page → `/storage/.../paper.pdf`, via
+      `citation_pdf_url` meta / `<object>` embed / download anchor; host
+      trigger is "sci-hub"/"scihub" substring because the mirror domain
+      rotates; same-host + document-extension safety; one hop max; raw mode
+      and non-HTML bypassed; failed hop falls back to the interstitial).
 
 ## Design principles
 1. **Backend-agnostic search**: no hardcoded provider anywhere in tool schemas or
@@ -72,8 +83,15 @@ Pipeline per URL:
    web_browse); other ≥400 → structured error with first 300 chars of body.
 3. **Wall heuristics** on 2xx short pages (<4 KB): JS-required, captcha,
    "verify you are human", Cloudflare/Datadome/Geetest markers, "unusual
-   traffic", "just a moment" → `blocked` + reason + hint.
-4. Content-type dispatch:
+   traffic", "just a moment" → `blocked` + reason + hint. (The 4 KB gate
+   runs on the page with `<style>`/`<script>` blocks stripped, so CSS-bloated
+   challenge pages can't hide behind their own markup.)
+4. **Site adapters** (`src/adapters/`, Phase E): if the response is HTML and a
+   registered adapter matches the host, the adapter may return the URL of the
+   real content (e.g. sci-hub paper page → PDF); the fetch then transparently
+   re-runs on that URL (one hop max) and the result is tagged
+   `[auto-followed from: …]`. `raw` mode skips adapters.
+5. Content-type dispatch:
    - `text/html` (or HTML-looking body) → **linkedom** parse → **@mozilla/
      readability** article → **turndown** markdown; if the article is thin
      (<200 chars), strip chrome (`nav/header/footer/aside/script/...`) and
@@ -83,7 +101,7 @@ Pipeline per URL:
    - `image/*` → returned as an **image content block** (base64) in the tool
      result, so the model can actually see it.
    - other text → passthrough (truncated to 4 KB if content-type unknown).
-5. Offload: content ≥ `offloadMinChars` (def 2 k) is written to
+6. Offload: content ≥ `offloadMinChars` (def 2 k) is written to
    `/tmp/pi-my-web/<timestamp>-<host+path>.md` and the path is mentioned in the
    result.
 
@@ -250,10 +268,12 @@ stable afterwards). Use the typebox-1.x array form:
 `Type.Union([…])` (variadic form produced the 09-05 `anyOf.some` crash).
 
 ## Verification
-- `node test/smoke.ts` — 49 checks: Phase A (search + fetch branches + walls)
+- `node test/smoke.ts` — 63 checks: Phase A (search + fetch branches + walls)
   + Phase B (live headless browse; wall + visiblePollMs=0 → blocked) + Phase D
   (offline outline/keyword/adapter-detection units, overview builder, live
-  arXiv/PubMed/Wikipedia adapter GETs). Uses a local HTTP server for
+  arXiv/PubMed/Wikipedia adapter GETs) + Phase E (sci-hub host-matching +
+  follow-URL units; live e2e paper-page→PDF, SKIP-not-FAIL when the mirror
+  serves a bot check or rotates). Uses a local HTTP server for
   PDF/image/wall fixtures (remote image URLs 404/429 non-deterministically);
   HTML + search hit the real network. Note: this box's LAN DNS cannot resolve
   example.com — browse test uses en.wikipedia.org.
@@ -281,6 +301,7 @@ src/browse.ts     Phase B: two-stage Playwright Firefox browse (wall-breaker)
 src/offload.ts    temp-file offload
 src/overview.ts   Phase D: source adapters (arxiv/pubmed/wikipedia), keyword
                   summary detection, heading outline, overview builder
+src/adapters/     Phase E: site adapters (index.ts registry, scihub.ts)
 src/fetcher.ts    per-URL orchestration + adapter pass + result formatting
                   (mode: overview | raw)
 test/smoke.ts     node test/smoke.ts

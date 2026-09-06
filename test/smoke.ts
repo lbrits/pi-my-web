@@ -12,6 +12,7 @@ import { loadConfig } from "../src/config.ts";
 import { searchAll, applyDomainFilter } from "../src/search.ts";
 import { fetchAll, formatFetchResults } from "../src/fetcher.ts";
 import { detectWall } from "../src/walls.ts";
+import { isScihubHost, scihubFollowUrl } from "../src/adapters/scihub.ts";
 import {
   buildOverview,
   detectSource,
@@ -166,7 +167,12 @@ server.close();
   check("wall: 403 blocked", detectWall({ status: 403, text: "denied" }).blocked === true);
   check("wall: 404 not a wall", detectWall({ status: 404, text: "not found" }).blocked === false);
   check("wall: challenge text blocked", detectWall({ status: 200, text: "<html><title>Just a moment...</title><body>Checking your browser</body></html>" }).blocked === true);
-  check("wall: long normal page not a wall", detectWall({ status: 200, text: "x".repeat(5000) }).blocked === false);
+    check("wall: long normal page not a wall", detectWall({ status: 200, text: "x".repeat(5000) }).blocked === false);
+  // AltCHA-style challenge: raw HTML > 4 KB due to inline CSS/JS, visible text tiny
+  const css = `<style>body{color:red}/* padding */${"x".repeat(4000)}</style>`;
+  const altcha = `<html><head>${css}</head><body><h1>Are you a robot?</h1><p>No</p></body></html>`;
+  check("wall: CSS-bloated challenge blocked", detectWall({ status: 200, text: altcha }).blocked === true);
+  check("wall: CSS-bloated normal page not a wall", detectWall({ status: 200, text: `<html><head>${css}</head><body>normal article text</body></html>` }).blocked === false);
 }
 
 // --- overview (Phase D, offline units) ---
@@ -240,6 +246,47 @@ server.close();
     const f = formatFetchResults([long], 2000, "overview");
     return /outline \(/.test(f) && !f.includes("lorem ipsum dolor sit amet ".repeat(5));
   })());
+}
+
+// --- adapters: scihub (offline units) ---
+{
+  check("scihub: matches sci-hub.ru", isScihubHost("https://sci-hub.ru/10.1103/PhysRev.124.41") === true);
+  check("scihub: matches mirror (scihub.su)", isScihubHost("https://scihub.su/x") === true);
+  check("scihub: matches www subdomain", isScihubHost("https://www.sci-hub.ru/10.1103/x.y") === true);
+  check("scihub: not a plain site", isScihubHost("https://example.com/") === false);
+  check("scihub: not just a path mention", isScihubHost("https://example.com/sci-hub/x") === false);
+  check("scihub: bad URL → false", isScihubHost("not a url") === false);
+
+  const metaHtml = `<html><head><meta name="citation_pdf_url" content="/storage/2024/t/anderson1961.pdf"></head><body>x</body></html>`;
+  const f1 = await scihubFollowUrl(metaHtml, "https://sci-hub.ru/10.1103/PhysRev.124.41");
+  check("scihub: follow from citation_pdf_url", f1 === "https://sci-hub.ru/storage/2024/t/anderson1961.pdf", f1 ?? "(null)");
+
+  const objHtml = `<html><body><object type="application/pdf" data="/storage/x/p.pdf#navpanes=0&view=FitH"></object></body></html>`;
+  const f2 = await scihubFollowUrl(objHtml, "https://sci-hub.se/10.123/abc");
+  check("scihub: follow from object[data], fragment stripped", f2 === "https://sci-hub.se/storage/x/p.pdf", f2 ?? "(null)");
+
+  check("scihub: no document link → null", (await scihubFollowUrl("<html><body>nothing here</body></html>", "https://sci-hub.ru/1.2")) === null);
+
+  const crossHost = await scihubFollowUrl(`<html><head><meta name="citation_pdf_url" content="https://evil.example/paper.pdf"></head></html>`, "https://sci-hub.ru/1.2");
+  check("scihub: cross-host link → null", crossHost === null, crossHost ?? "(null)");
+
+  const appPage = await scihubFollowUrl(`<html><head><meta name="citation_pdf_url" content="/search?doi=1.2"></head></html>`, "https://sci-hub.ru/1.2");
+  check("scihub: non-document path → null", appPage === null, appPage ?? "(null)");
+}
+
+// --- adapters: scihub (live e2e — SKIP, not FAIL, if the mirror rotated) ---
+{
+  const [o] = await fetchAll(cfg.fetch, ["https://www.sci-hub.ru/10.1103/PhysRev.124.41"], {});
+  if (o.blocked || !o.ok) {
+    console.log(`SKIP  scihub live e2e (${o.blocked ? "blocked" : "error"}: ${o.reason}) — mirror likely rotated; update the test URL`);
+  } else {
+    check(
+      "scihub live: paper page auto-followed to PDF",
+      o.followedFrom !== undefined && o.followedFrom.includes("10.1103/PhysRev.124.41") && (o.content?.length ?? 0) > 500,
+      `followedFrom=${o.followedFrom ?? "(none)"} chars=${o.content?.length}`,
+    );
+    check("scihub live: PDF text extracted", /Localized Magnetic States/i.test(o.content ?? ""));
+  }
 }
 
 // --- overview: live source adapters (network) ---

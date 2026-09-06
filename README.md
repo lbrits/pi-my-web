@@ -11,7 +11,9 @@ backend-agnostic tools.
   automatic fallback). Parallel multi-query, recency + domain filters.
 - **web_fetch** — HTML→readability→markdown, PDF→pdfjs text, images returned
   as image attachments, long content offloaded to a temp file, bot-wall
-  detection with structured `blocked` results.
+  detection with structured `blocked` results, and site adapters
+  (`src/adapters/`, one little .ts per site) that auto-follow interstitial
+  pages to the real document (currently: Sci-Hub paper page → PDF).
 
 ## Setup
 ```bash

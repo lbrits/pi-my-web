@@ -2,6 +2,7 @@ import type { FetchConfig, FetchOutcome } from "./types.ts";
 import { download } from "./http.ts";
 import { detectWall } from "./walls.ts";
 import { extract } from "./pipeline.ts";
+import { ADAPTERS } from "./adapters/index.ts";
 import { offloadContent } from "./offload.ts";
 import { buildOverview, detectSource, fetchSourceMeta } from "./overview.ts";
 
@@ -10,7 +11,7 @@ const utf8 = new TextDecoder("utf-8", { fatal: false });
 export async function fetchOne(
   url: string,
   cfg: FetchConfig,
-  opts: { raw?: boolean; signal?: AbortSignal },
+  opts: { raw?: boolean; signal?: AbortSignal; _hopped?: boolean },
 ): Promise<FetchOutcome> {
   const out: FetchOutcome = { url, ok: false, kind: "error" };
 
@@ -49,6 +50,28 @@ export async function fetchOne(
     out.reason = `bot wall: ${wall.reason}`;
     out.content = text.slice(0, 300);
     return out;
+  }
+
+  // Site adapters: interstitial → real content (e.g. Sci-Hub paper page → PDF).
+  // HTML responses only, non-raw mode, at most one hop per request. On a
+  // failed hop we fall through and report the interstitial page as usual.
+  if (!opts.raw && !opts._hopped) {
+    const ct = (res.contentType ?? "").toLowerCase();
+    const looksLikeHtml = ct.includes("html") || /<(!doctype html|html[\s>])/i.test(text.slice(0, 1000));
+    if (looksLikeHtml) {
+      for (const a of ADAPTERS) {
+        if (!a.matches(url)) continue;
+        const follow = await a.followUrl(text, url);
+        if (follow && follow !== url) {
+          const sub = await fetchOne(follow, cfg, { signal: opts.signal, _hopped: true });
+          if (sub.ok) {
+            sub.followedFrom = url;
+            return sub;
+          }
+        }
+        break; // first matching adapter wins
+      }
+    }
   }
 
   try {
@@ -120,6 +143,7 @@ export function formatFetchResults(
       .filter(Boolean)
       .join(" ");
     const lines: string[] = [`## ${o.url}`, meta ? `(${meta})` : ""];
+    if (o.followedFrom) lines.push(`[auto-followed from: ${o.followedFrom}]`);
 
     if (o.blocked) {
       lines.push(`BLOCKED — ${o.reason}`);
