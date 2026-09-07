@@ -381,6 +381,7 @@ server.close();
   const block = healthBlock(log);
   check("health: block rendered when errors exist", !!block && block.startsWith("pi-my-web health"), block?.slice(0, 80));
   check("health: block lists a group", !!block && block.includes("bot-wall"));
+  check("health: 404s excluded from block (still in errors.jsonl)", !!block && !block.includes("not-found"));
   const quiet: LoggingConfig = { ...log, dir: mkdtempSync(join(tmpdir(), "pi-my-web-logtest-quiet-")) };
   check("health: no block when no errors", healthBlock(quiet) === undefined);
   check("health: suppressed when disabled", healthBlock({ ...log, healthReport: false }) === undefined);

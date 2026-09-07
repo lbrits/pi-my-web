@@ -225,7 +225,9 @@ export function recentErrorGroups(cfg: LoggingConfig): HealthGroup[] {
 export function healthBlock(cfg: LoggingConfig): string | undefined {
   if (!cfg.healthReport) return undefined;
   try {
-    const groups = recentErrorGroups(cfg);
+    // 404s stay in errors.jsonl but don't nag: a missing page is a content
+    // miss, not a broken tool.
+    const groups = recentErrorGroups(cfg).filter((g) => g.kind !== "not-found");
     if (groups.length === 0) return undefined;
     const lines = groups
       .slice(0, 6)

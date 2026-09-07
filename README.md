@@ -34,7 +34,8 @@ thinking traces:
 
 At agent start, if the error log has entries within the health window, a
 compact “pi-my-web health” block is appended to the system prompt (injected
-once per prompt, never duplicated). All of it is configurable under
+once per prompt, never duplicated; `not-found`/404s are kept out of the
+block since a missing page is a content miss, not a broken tool). All of it is configurable under
 `logging` in the config file:
 
 ```json
