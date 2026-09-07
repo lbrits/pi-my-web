@@ -4,6 +4,7 @@ import { loadConfig } from "./config.ts";
 import { searchAll, formatSearchResults } from "./search.ts";
 import { fetchAll, formatFetchResults } from "./fetcher.ts";
 import { browse } from "./browse.ts";
+import { healthBlock, recordError, recordOutcome } from "./logging.ts";
 
 const timeRangeEnum = Type.Union([
   Type.Literal("day"),
@@ -14,7 +15,23 @@ const timeRangeEnum = Type.Union([
 
 const fetchModeEnum = Type.Union([Type.Literal("overview"), Type.Literal("raw")]);
 
+/** Marker checked so the health block is injected at most once per prompt chain. */
+const HEALTH_MARKER = "pi-my-web health —";
+
 export default function (pi: ExtensionAPI) {
+  // Session-start health report: if the error log has recent failures, tell
+  // the model (and the user) up front so tool trouble can't go unnoticed.
+  pi.on("before_agent_start", (event) => {
+    try {
+      const block = healthBlock(loadConfig().logging);
+      if (block && !event.systemPrompt.includes(HEALTH_MARKER)) {
+        return { systemPrompt: event.systemPrompt + "\n\n" + block };
+      }
+    } catch {
+      /* never break the agent loop over a health report */
+    }
+  });
+
   pi.registerTool({
     name: "web_search",
     label: "Web Search",
@@ -51,13 +68,15 @@ export default function (pi: ExtensionAPI) {
       try {
         const queries: string[] | undefined =
           params.queries ?? (params.query ? [params.query] : undefined);
+        const cfg = loadConfig();
         if (!queries || queries.length === 0) {
+          recordError(cfg.logging, "web_search", "", "usage", "missing query");
           return {
             content: [{ type: "text" as const, text: "web_search: provide `query` or `queries`." }],
             details: { error: "missing query" },
           };
         }
-        const cfg = loadConfig();
+        const t0 = Date.now();
         const outcomes = await searchAll(cfg, {
           queries,
           numResults: params.numResults ?? 5,
@@ -65,6 +84,14 @@ export default function (pi: ExtensionAPI) {
           domainFilter: params.domainFilter,
           signal,
         });
+        for (const o of outcomes) {
+          recordOutcome(cfg.logging, "web_search", {
+            query: o.query,
+            ok: o.ok,
+            reason: o.error,
+            ms: Date.now() - t0,
+          });
+        }
         return {
           content: [{ type: "text" as const, text: formatSearchResults(outcomes) }],
           details: {
@@ -77,6 +104,11 @@ export default function (pi: ExtensionAPI) {
           },
         };
       } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        try {
+          const target = Array.isArray(params?.queries) ? params.queries.join(" ") : String(params?.query ?? "");
+          recordError(loadConfig().logging, "web_search", target, "exception", msg);
+        } catch { /* ignore */ }
         return {
           content: [
             {
@@ -134,15 +166,27 @@ export default function (pi: ExtensionAPI) {
       _ctx?: unknown,
     ) {
       try {
+        const cfg = loadConfig();
         const urls: string[] | undefined = params.urls ?? (params.url ? [params.url] : undefined);
         if (!urls || urls.length === 0) {
+          recordError(cfg.logging, "web_fetch", "", "usage", "missing url");
           return {
             content: [{ type: "text" as const, text: "web_fetch: provide `url` or `urls`." }],
             details: { error: "missing url" },
           };
         }
-        const cfg = loadConfig();
+        const t0 = Date.now();
         const outcomes = await fetchAll(cfg.fetch, urls, { raw: params.raw, signal });
+        for (const o of outcomes) {
+          recordOutcome(cfg.logging, "web_fetch", {
+            url: o.url,
+            ok: o.ok,
+            status: o.status,
+            blocked: o.blocked,
+            reason: o.reason,
+            ms: Date.now() - t0,
+          });
+        }
         const mode: "overview" | "raw" = params.mode === "raw" ? "raw" : "overview";
         const text = formatFetchResults(outcomes, params.maxChars ?? cfg.fetch.maxInlineChars, mode);
         return {
@@ -169,6 +213,11 @@ export default function (pi: ExtensionAPI) {
           },
         };
       } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        try {
+          const target = Array.isArray(params?.urls) ? params.urls.join(", ") : String(params?.url ?? "");
+          recordError(loadConfig().logging, "web_fetch", target, "exception", msg);
+        } catch { /* ignore */ }
         return {
           content: [
             {
@@ -211,14 +260,25 @@ export default function (pi: ExtensionAPI) {
       _ctx?: unknown,
     ) {
       try {
+        const cfg = loadConfig();
         if (!params.url) {
+          recordError(cfg.logging, "web_browse", "", "usage", "missing url");
           return {
             content: [{ type: "text" as const, text: "web_browse: provide `url`." }],
             details: { error: "missing url" },
           };
         }
-        const cfg = loadConfig();
+        const t0 = Date.now();
         const o = await browse(cfg, params.url, { raw: params.raw === true, signal });
+        recordOutcome(cfg.logging, "web_browse", {
+          url: o.url,
+          ok: o.ok,
+          status: o.status,
+          blocked: o.blocked,
+          reason: o.reason,
+          stage: o.stage,
+          ms: Date.now() - t0,
+        });
         const mode: "overview" | "raw" = params.mode === "raw" ? "raw" : "overview";
         const text = formatFetchResults([o], params.maxChars ?? cfg.fetch.maxInlineChars, mode);
         return {
@@ -236,6 +296,10 @@ export default function (pi: ExtensionAPI) {
           },
         };
       } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        try {
+          recordError(loadConfig().logging, "web_browse", String(params?.url ?? ""), "exception", msg);
+        } catch { /* ignore */ }
         return {
           content: [
             {

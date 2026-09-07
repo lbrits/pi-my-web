@@ -23,6 +23,36 @@ ln -s /path/to/pi-my-web ~/.pi/agent/extensions/pi-my-web   # or copy
 Optional per-user config: `~/.pi/agent/pi-my-web.json` (see PLAN.md for the
 schema; defaults include a local SearXNG backend).
 
+## Logging & health report
+Both tools log every outcome (JSONL) so failures are visible without reading
+thinking traces:
+- `~/.pi/agent/pi-my-web/requests.jsonl` — one line per URL/query (tool, ok,
+  status, blocked, stage, ms)
+- `~/.pi/agent/pi-my-web/errors.jsonl` — failures only, with a `kind`:
+  `bot-wall`, `timeout`, `not-found`, `http-error`, `network`, `backend-down`,
+  `usage`, `exception`
+
+At agent start, if the error log has entries within the health window, a
+compact “pi-my-web health” block is appended to the system prompt (injected
+once per prompt, never duplicated). All of it is configurable under
+`logging` in the config file:
+
+```json
+{
+  "logging": {
+    "requests": true,
+    "errors": true,
+    "healthReport": true,
+    "retentionDays": 30,
+    "healthWindowDays": 7,
+    "dir": null
+  }
+}
+```
+
+(`dir: null` → `~/.pi/agent/pi-my-web`. Logging is best-effort: a logging
+failure can never break a tool call or the agent loop.)
+
 ## Test
 ```bash
 node test/smoke.ts

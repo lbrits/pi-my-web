@@ -31,6 +31,14 @@ const DEFAULT_CONFIG: PiMyWebConfig = {
     viewportWidth: 1366,
     viewportHeight: 900,
   },
+  logging: {
+    requests: true,
+    errors: true,
+    healthReport: true,
+    retentionDays: 30,
+    healthWindowDays: 7,
+    dir: null,
+  },
 };
 
 function isObj(v: unknown): v is Record<string, unknown> {

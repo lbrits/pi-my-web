@@ -24,7 +24,10 @@ import {
   isSummaryHeading,
   pdfKeywordAbstract,
 } from "../src/overview.ts";
-import type { FetchOutcome } from "../src/types.ts";
+import type { FetchOutcome, LoggingConfig } from "../src/types.ts";
+import { recordOutcome, recordError, recentErrorGroups, healthBlock, classifyFailure } from "../src/logging.ts";
+import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 let failures = 0;
 function check(name: string, ok: boolean, extra?: string) {
@@ -340,6 +343,48 @@ server.close();
   const mp = detectSource("https://pubmed.ncbi.nlm.nih.gov/22745249/");
   const metaP = mp ? await fetchSourceMeta(mp, cfg.fetch) : undefined;
   check("adapter pubmed: efetch", (metaP?.abstract?.length ?? 0) > 100, metaP?.abstract?.slice(0, 80));
+}
+
+// --- logging: request/error JSONL + health block (offline) ---
+{
+  const dir = mkdtempSync(join(tmpdir(), "pi-my-web-logtest-"));
+  const log: LoggingConfig = {
+    requests: true,
+    errors: true,
+    healthReport: true,
+    retentionDays: 30,
+    healthWindowDays: 7,
+    dir,
+  };
+
+  recordOutcome(log, "web_fetch", { url: "https://ok.example/x", ok: true, status: 200, ms: 120 });
+  recordOutcome(log, "web_fetch", { url: "https://wall.example/", ok: false, status: 403, blocked: true, reason: "HTTP 403 (browser check)", ms: 300 });
+  recordOutcome(log, "web_fetch", { url: "https://ok.example/gone", ok: false, status: 404, reason: "HTTP 404", ms: 50 });
+  recordOutcome(log, "web_search", { query: "some query", ok: false, reason: "fetch failed (connection refused)", ms: 20000 });
+  recordOutcome(log, "web_browse", { url: "https://slow.example/", ok: false, reason: "page.goto: Timeout 45000ms exceeded", ms: 45000, stage: 1 });
+  recordError(log, "web_fetch", "", "usage", "missing url");
+
+  const reqLines = readFileSync(join(dir, "requests.jsonl"), "utf8").trim().split("\n");
+  check("logging: one requests line per recordOutcome (usage goes to errors only)", reqLines.length === 5, `${reqLines.length} lines`);
+  const errLines = readFileSync(join(dir, "errors.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  const kinds = Object.fromEntries(errLines.map((e) => [e.target || e.tool, e.kind]));
+  check("logging: 5 failures recorded", errLines.length === 5, `${errLines.length} lines`);
+  check("logging: wall classified bot-wall", kinds["https://wall.example/"] === "bot-wall");
+  check("logging: 404 classified not-found", kinds["https://ok.example/gone"] === "not-found");
+  check("logging: search failure → backend-down", kinds["some query"] === "backend-down");
+  check("logging: browse timeout classified timeout", kinds["https://slow.example/"] === "timeout");
+  check("logging: explicit usage kind kept", kinds["web_fetch"] === "usage" || errLines.some((e) => e.kind === "usage"));
+  check("classify: wall beats 403-only status", classifyFailure("web_fetch", { ok: false, status: 403, reason: "bot wall: HTTP 403 (browser check)" }) === "bot-wall");
+
+  const groups = recentErrorGroups(log);
+  check("logging: groups by tool+kind", groups.length === 5, groups.map((g) => `${g.tool}:${g.kind}`).join(", "));
+  const block = healthBlock(log);
+  check("health: block rendered when errors exist", !!block && block.startsWith("pi-my-web health"), block?.slice(0, 80));
+  check("health: block lists a group", !!block && block.includes("bot-wall"));
+  const quiet: LoggingConfig = { ...log, dir: mkdtempSync(join(tmpdir(), "pi-my-web-logtest-quiet-")) };
+  check("health: no block when no errors", healthBlock(quiet) === undefined);
+  check("health: suppressed when disabled", healthBlock({ ...log, healthReport: false }) === undefined);
+  rmSync(dir, { recursive: true, force: true });
 }
 
 console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);

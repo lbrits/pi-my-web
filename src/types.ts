@@ -31,10 +31,26 @@ export interface BrowseConfig {
   viewportHeight: number;
 }
 
+export interface LoggingConfig {
+  /** append one JSONL line per URL/query outcome to requests.jsonl */
+  requests: boolean;
+  /** append failures (walls, timeouts, HTTP errors, exceptions) to errors.jsonl */
+  errors: boolean;
+  /** inject a recent-failure health block into the system prompt at agent start */
+  healthReport: boolean;
+  /** prune both logs of entries older than this */
+  retentionDays: number;
+  /** window scanned for the health report */
+  healthWindowDays: number;
+  /** log directory; null → ~/.pi/agent/pi-my-web */
+  dir: string | null;
+}
+
 export interface PiMyWebConfig {
   search: SearchConfig;
   fetch: FetchConfig;
   browse: BrowseConfig;
+  logging: LoggingConfig;
 }
 
 export interface SearchResult {
