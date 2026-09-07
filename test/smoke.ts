@@ -25,7 +25,7 @@ import {
   pdfKeywordAbstract,
 } from "../src/overview.ts";
 import type { FetchOutcome, LoggingConfig } from "../src/types.ts";
-import { recordOutcome, recordError, recentErrorGroups, healthBlock, classifyFailure } from "../src/logging.ts";
+import { recordOutcome, recordError, classifyFailure } from "../src/logging.ts";
 import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 
@@ -376,15 +376,18 @@ server.close();
   check("logging: explicit usage kind kept", kinds["web_fetch"] === "usage" || errLines.some((e) => e.kind === "usage"));
   check("classify: wall beats 403-only status", classifyFailure("web_fetch", { ok: false, status: 403, reason: "bot wall: HTTP 403 (browser check)" }) === "bot-wall");
 
-  const groups = recentErrorGroups(log);
-  check("logging: groups by tool+kind", groups.length === 5, groups.map((g) => `${g.tool}:${g.kind}`).join(", "));
-  const block = healthBlock(log);
-  check("health: block rendered when errors exist", !!block && block.startsWith("pi-my-web health"), block?.slice(0, 80));
-  check("health: block lists a group", !!block && block.includes("bot-wall"));
-  check("health: 404s excluded from block (still in errors.jsonl)", !!block && !block.includes("not-found"));
-  const quiet: LoggingConfig = { ...log, dir: mkdtempSync(join(tmpdir(), "pi-my-web-logtest-quiet-")) };
-  check("health: no block when no errors", healthBlock(quiet) === undefined);
-  check("health: suppressed when disabled", healthBlock({ ...log, healthReport: false }) === undefined);
+  // Health-block checks retired 2026-09-07 with the per-chat injection
+  // (healthBlock/recentErrorGroups commented out in src/logging.ts; the
+  // reflection moved to the /sleep pass — sleep.md "web health" step).
+  // const groups = recentErrorGroups(log);
+  // check("logging: groups by tool+kind", groups.length === 5, groups.map((g) => `${g.tool}:${g.kind}`).join(", "));
+  // const block = healthBlock(log);
+  // check("health: block rendered when errors exist", !!block && block.startsWith("pi-my-web health"), block?.slice(0, 80));
+  // check("health: block lists a group", !!block && block.includes("bot-wall"));
+  // check("health: 404s excluded from block (still in errors.jsonl)", !!block && !block.includes("not-found"));
+  // const quiet: LoggingConfig = { ...log, dir: mkdtempSync(join(tmpdir(), "pi-my-web-logtest-quiet-")) };
+  // check("health: no block when no errors", healthBlock(quiet) === undefined);
+  // check("health: suppressed when disabled", healthBlock({ ...log, healthReport: false }) === undefined);
   rmSync(dir, { recursive: true, force: true });
 }
 

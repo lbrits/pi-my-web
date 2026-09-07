@@ -4,7 +4,7 @@ import { loadConfig } from "./config.ts";
 import { searchAll, formatSearchResults } from "./search.ts";
 import { fetchAll, formatFetchResults } from "./fetcher.ts";
 import { browse } from "./browse.ts";
-import { healthBlock, recordError, recordOutcome } from "./logging.ts";
+import { recordError, recordOutcome } from "./logging.ts";
 
 const timeRangeEnum = Type.Union([
   Type.Literal("day"),
@@ -15,22 +15,25 @@ const timeRangeEnum = Type.Union([
 
 const fetchModeEnum = Type.Union([Type.Literal("overview"), Type.Literal("raw")]);
 
-/** Marker checked so the health block is injected at most once per prompt chain. */
-const HEALTH_MARKER = "pi-my-web health —";
+// Retired 2026-09-07: per-chat health-block injection. The block was passive
+// data appended to the system prompt — the model had no reason to surface it,
+// so it effectively never fired. The reflection moved to the /sleep pass
+// (~/.pi/agent/prompts/sleep.md, "web health" step), which reads
+// ~/.pi/agent/pi-my-web/errors.jsonl directly.
+// const HEALTH_MARKER = "pi-my-web health —";
 
 export default function (pi: ExtensionAPI) {
-  // Session-start health report: if the error log has recent failures, tell
-  // the model (and the user) up front so tool trouble can't go unnoticed.
-  pi.on("before_agent_start", (event) => {
-    try {
-      const block = healthBlock(loadConfig().logging);
-      if (block && !event.systemPrompt.includes(HEALTH_MARKER)) {
-        return { systemPrompt: event.systemPrompt + "\n\n" + block };
-      }
-    } catch {
-      /* never break the agent loop over a health report */
-    }
-  });
+  // (health-block injection retired 2026-09-07 — see note above)
+  // pi.on("before_agent_start", (event) => {
+  //   try {
+  //     const block = healthBlock(loadConfig().logging);
+  //     if (block && !event.systemPrompt.includes(HEALTH_MARKER)) {
+  //       return { systemPrompt: event.systemPrompt + "\n\n" + block };
+  //     }
+  //   } catch {
+  //     /* never break the agent loop over a health report */
+  //   }
+  // });
 
   pi.registerTool({
     name: "web_search",

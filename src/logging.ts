@@ -1,13 +1,18 @@
 /**
- * Request/error logging + session-start health report.
+ * Request/error logging (+ retired per-chat health report).
  *
  * Two JSONL files under ~/.pi/agent/pi-my-web/ (config: `logging.dir`):
  *   requests.jsonl — one line per URL/query outcome (every tool call)
  *   errors.jsonl   — failures only, with a `kind` classification
  *
- * `healthBlock()` renders recent errors.jsonl groups as a compact text block;
- * the extension injects it into the system prompt via before_agent_start so
- * the model (and the user) sees tool trouble even if they never read logs.
+ * The health report used to be injected into the system prompt on every
+ * before_agent_start. Retired 2026-09-07: the block was passive data the
+ * model had no reason to surface, so it effectively never fired. The
+ * reflection now lives in the /sleep pass
+ * (~/.pi/agent/prompts/sleep.md, "web health" step), which reads
+ * errors.jsonl directly. The block-rendering code below is commented out
+ * (kept, with matching commented-out smoke checks, for a possible
+ * /webhealth command).
  *
  * All functions are best-effort: a logging failure must never break a tool
  * call or the agent loop, so everything is try/caught silently.
@@ -45,13 +50,15 @@ export function logDir(dir: string | null): string {
   return dir ?? join(homedir(), ".pi", "agent", "pi-my-web");
 }
 
-function requestsPath(cfg: LoggingConfig): string {
-  return join(logDir(cfg.dir), "requests.jsonl");
-}
-
-function errorsPath(cfg: LoggingConfig): string {
-  return join(logDir(cfg.dir), "errors.jsonl");
-}
+// Retired 2026-09-07 with the health report (only used by readEntries /
+// healthBlock below). Kept for a possible /webhealth command.
+// function requestsPath(cfg: LoggingConfig): string {
+//   return join(logDir(cfg.dir), "requests.jsonl");
+// }
+//
+// function errorsPath(cfg: LoggingConfig): string {
+//   return join(logDir(cfg.dir), "errors.jsonl");
+// }
 
 let lastPrune = 0;
 
@@ -164,86 +171,91 @@ export function recordError(
   }
 }
 
-export interface HealthGroup {
-  tool: string;
-  kind: LogKind;
-  count: number;
-  last: string;
-  sample: string;
-}
-
-function readEntries(cfg: LoggingConfig): Record<string, unknown>[] {
-  const p = errorsPath(cfg);
-  if (!existsSync(p)) return [];
-  const out: Record<string, unknown>[] = [];
-  for (const line of readFileSync(p, "utf8").split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      out.push(JSON.parse(line));
-    } catch {
-      /* skip corrupt line */
-    }
-  }
-  return out;
-}
-
-/** Group errors within healthWindowDays by (tool, kind), newest group first. */
-export function recentErrorGroups(cfg: LoggingConfig): HealthGroup[] {
-  const cutoff = Date.now() - cfg.healthWindowDays * 86400 * 1000;
-  const groups = new Map<string, HealthGroup>();
-  for (const e of readEntries(cfg)) {
-    const t = new Date(String(e.t)).getTime();
-    if (Number.isNaN(t) || t < cutoff) continue;
-    const key = `${e.tool}|${e.kind}`;
-    const g = groups.get(key);
-    const sample =
-      [e.target, e.detail ? String(e.detail).slice(0, 80) : null].filter(Boolean).join(" — ");
-    if (g) {
-      g.count++;
-      if (String(e.t) > g.last) {
-        g.last = String(e.t);
-        g.sample = sample;
-      }
-    } else {
-      groups.set(key, {
-        tool: String(e.tool),
-        kind: String(e.kind) as LogKind,
-        count: 1,
-        last: String(e.t),
-        sample,
-      });
-    }
-  }
-  return [...groups.values()].sort((a, b) => b.last.localeCompare(a.last));
-}
-
-/**
- * Compact health block for system-prompt injection, or undefined when there is
- * nothing to report. The leading marker line doubles as the dedupe token the
- * before_agent_start handler checks for.
- */
-export function healthBlock(cfg: LoggingConfig): string | undefined {
-  if (!cfg.healthReport) return undefined;
-  try {
-    // 404s stay in errors.jsonl but don't nag: a missing page is a content
-    // miss, not a broken tool.
-    const groups = recentErrorGroups(cfg).filter((g) => g.kind !== "not-found");
-    if (groups.length === 0) return undefined;
-    const lines = groups
-      .slice(0, 6)
-      .map(
-        (g) =>
-          `- ${g.tool}: ${g.count}× ${g.kind} (latest ${g.last.slice(5, 16).replace("T", " ")}${
-            g.sample ? `, e.g. ${g.sample.slice(0, 90)}` : ""
-          })`,
-      );
-    return (
-      "pi-my-web health — recent web tool failures (last " +
-      `${cfg.healthWindowDays} days; full log ${errorsPath(cfg)}):` +
-      "\n" +
-      lines.join("\n")
-    );
-  } catch {
-    return undefined;
-  }
-}
+// ── Retired 2026-09-07: health-block rendering (see header). The per-chat
+//    system-prompt injection was passive data the model had no reason to
+//    surface; the reflection moved to the /sleep pass (sleep.md "web health"
+//    step), which reads errors.jsonl directly. Kept for a possible /webhealth
+//    command; matching smoke checks are commented out in test/smoke.ts. ──
+// export interface HealthGroup {
+//   tool: string;
+//   kind: LogKind;
+//   count: number;
+//   last: string;
+//   sample: string;
+// }
+//
+// function readEntries(cfg: LoggingConfig): Record<string, unknown>[] {
+//   const p = errorsPath(cfg);
+//   if (!existsSync(p)) return [];
+//   const out: Record<string, unknown>[] = [];
+//   for (const line of readFileSync(p, "utf8").split("\n")) {
+//     if (!line.trim()) continue;
+//     try {
+//       out.push(JSON.parse(line));
+//     } catch {
+//       /* skip corrupt line */
+//     }
+//   }
+//   return out;
+// }
+//
+// /** Group errors within healthWindowDays by (tool, kind), newest group first. */
+// export function recentErrorGroups(cfg: LoggingConfig): HealthGroup[] {
+//   const cutoff = Date.now() - cfg.healthWindowDays * 86400 * 1000;
+//   const groups = new Map<string, HealthGroup>();
+//   for (const e of readEntries(cfg)) {
+//     const t = new Date(String(e.t)).getTime();
+//     if (Number.isNaN(t) || t < cutoff) continue;
+//     const key = `${e.tool}|${e.kind}`;
+//     const g = groups.get(key);
+//     const sample =
+//       [e.target, e.detail ? String(e.detail).slice(0, 80) : null].filter(Boolean).join(" — ");
+//     if (g) {
+//       g.count++;
+//       if (String(e.t) > g.last) {
+//         g.last = String(e.t);
+//         g.sample = sample;
+//       }
+//     } else {
+//       groups.set(key, {
+//         tool: String(e.tool),
+//         kind: String(e.kind) as LogKind,
+//         count: 1,
+//         last: String(e.t),
+//         sample,
+//       });
+//     }
+//   }
+//   return [...groups.values()].sort((a, b) => b.last.localeCompare(a.last));
+// }
+//
+// /**
+//  * Compact health block for system-prompt injection, or undefined when there is
+//  * nothing to report. The leading marker line doubles as the dedupe token the
+//  * before_agent_start handler checks for.
+//  */
+// export function healthBlock(cfg: LoggingConfig): string | undefined {
+//   if (!cfg.healthReport) return undefined;
+//   try {
+//     // 404s stay in errors.jsonl but don't nag: a missing page is a content
+//     // miss, not a broken tool.
+//     const groups = recentErrorGroups(cfg).filter((g) => g.kind !== "not-found");
+//     if (groups.length === 0) return undefined;
+//     const lines = groups
+//       .slice(0, 6)
+//       .map(
+//         (g) =>
+//           `- ${g.tool}: ${g.count}× ${g.kind} (latest ${g.last.slice(5, 16).replace("T", " ")}${
+//             g.sample ? `, e.g. ${g.sample.slice(0, 90)}` : ""
+//           })`,
+//       );
+//     return (
+//       "pi-my-web health — recent web tool failures (last " +
+//       `${cfg.healthWindowDays} days; full log ${errorsPath(cfg)}):` +
+//       "\n" +
+//       lines.join("\n")
+//     );
+//   } catch {
+//     return undefined;
+//   }
+// }
