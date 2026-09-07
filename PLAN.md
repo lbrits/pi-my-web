@@ -36,6 +36,14 @@ enum via patch" sub-clause of the pi-lazy-tools verdict (that verdict otherwise 
       trigger is "sci-hub"/"scihub" substring because the mirror domain
       rotates; same-host + document-extension safety; one hop max; raw mode
       and non-HTML bypassed; failed hop falls back to the interstitial).
+- [x] **Browse hardening (403 challenges + stale status)** (2026-09-07):
+      `web_browse` on Cloudflare-protected sites (e.g. tex.stackexchange.com)
+      reported "hard wall, not a solvable challenge" — the CF challenge page
+      arrives with **403**, and the old code short-circuited *every* 4xx before
+      the visible stage, so the visible window never opened. Fix: 4xx/5xx with
+      an interactive-challenge body now escalate to the visible stage; stage 2
+      poll/finish use body-only wall checks (the stale 403 no longer poisons a
+      cleared challenge). See "Browse hardening" section below.
 
 ## Design principles
 1. **Backend-agnostic search**: no hardcoded provider anywhere in tool schemas or
@@ -306,3 +314,44 @@ src/fetcher.ts    per-URL orchestration + adapter pass + result formatting
                   (mode: overview | raw)
 test/smoke.ts     node test/smoke.ts
 ```
+
+## Browse hardening — 403 challenges + stale status (2026-09-07)
+Triggered by a live failure: `web_browse` on tex.stackexchange.com reported
+"hard wall, not a solvable challenge". Root cause: Cloudflare serves its
+"Just a moment" challenge with **HTTP 403**, and `browseOne` short-circuited
+*every* 4xx/5xx ("a visible window won't help; report and stop") before the
+stage-2 visible launch — the 2xx-challenge→visible escalation path could never
+fire for CF. Latent bug found in the same pass: stage 2 kept the initial
+goto's status (the 403) through the poll loop and `finish()`, and
+`detectWall` checks status first — so a challenge cleared in the visible
+window would still have been reported as not cleared (it only ever worked via
+cookie persistence for the *next* call).
+
+Changes:
+- `walls.ts`: patterns split into interactive **CHALLENGE** (JS check, captcha,
+  `cf-chl`/challenge-platform, datadome, geetest, "just a moment",
+  "attention required", verify-human) vs static **REFUSAL** ("access denied",
+  "request blocked", "unusual traffic"). New `wallFromBody(html): {blocked,
+  reason, challenge}` — status-agnostic (challenge patterns checked first).
+  `detectWall` now enriches status reasons: `HTTP 403 (browser check)`.
+- `browse.ts`: stage 1 escalates 4xx/5xx to the visible stage when the body
+  is an interactive challenge (and `visiblePollMs > 0`); static refusals and
+  `visiblePollMs=0` still short-circuit (distinct reason texts: "interactive
+  challenge, but no visible fallback" vs "hard wall, not a solvable
+  challenge"). Stage 2 poll loop + `challengeCleared` use `wallFromBody`
+  (body-only); cleared path calls `finish` with a synthetic 200 so the stale
+  403 can't re-flag the real page (journey documented by
+  `stage=2` + `challengeCleared=true`).
+- `smoke.ts`: new local `/wall403` fixture (403 + "Just a moment"). Tests:
+  403-challenge + `visiblePollMs=0` → no escalation (stage 1, "no visible
+  fallback"); + 1.5 s visible window → stage 2 reached (a visible Firefox
+  window opens for ~2 s during the test run); unit checks for
+  challenge-vs-refusal body classification.
+- Deploy: commit on canonical → research mirror `git pull` → /reload both pi
+  sessions (running sessions keep the old code until reload).
+
+Known limits (accepted):
+- A visible window still on a 403 challenge page after `visiblePollMs` reports
+  "challenge not cleared" — retry works (profile cookies persist).
+- Headless stage 1 is still fingerprinted by Cloudflare; the hardening makes
+  the *visible* stage reachable, it does not make headless pass CF.

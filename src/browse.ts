@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { BrowseConfig, FetchConfig, FetchOutcome, PiMyWebConfig } from "./types.ts";
-import { detectWall } from "./walls.ts";
+import { detectWall, wallFromBody } from "./walls.ts";
 import { htmlToMarkdown } from "./pipeline.ts";
 import { offloadContent } from "./offload.ts";
 import { detectSource, fetchSourceMeta } from "./overview.ts";
@@ -16,9 +16,14 @@ import { detectSource, fetchSourceMeta } from "./overview.ts";
  *
  * Two stages:
  *   1. headless navigation with the saved profile;
- *   2. if a 2xx challenge page is still present and visiblePollMs > 0:
- *      relaunch with a VISIBLE window and poll (2 s) up to visiblePollMs
- *      for the user to clear the challenge, then re-read the page.
+ *   2. if a wall is still present and visiblePollMs > 0: relaunch with a
+ *      VISIBLE window and poll (2 s) up to visiblePollMs for the user to
+ *      clear the challenge, then re-read the page. Stage 2 is entered both
+ *      for 2xx challenge pages AND for 4xx/5xx responses whose body looks
+ *      like an interactive challenge — bot managers (Cloudflare & co.) serve
+ *      their "Just a moment" challenge with 403, and a visible browser (or
+ *      its persistent profile) often clears it. Static refusals (plain
+ *      "access denied") never escalate.
  *
  * Result shape mirrors web_fetch (FetchOutcome); offload + source-adapter
  * post-processing are the same as fetchAll.
@@ -127,13 +132,18 @@ export async function browseOne(
     ctx = null;
     userClosed = false;
 
-    // 4xx/5xx: a visible window won't help; report and stop
-    if (r.status < 200 || r.status >= 400) {
+    // 4xx/5xx: static refusals won't clear in a visible window — report and
+    // stop. Exception: the body is an *interactive* challenge (bot managers
+    // serve their 403 "Just a moment" page) → fall through to stage 2.
+    const body1 = wallFromBody(r.html);
+    if ((r.status < 200 || r.status >= 400) && !(body1.challenge && bc.visiblePollMs > 0)) {
       out.blocked = [401, 403, 407, 429, 503].includes(r.status);
       out.kind = "blocked";
       out.status = r.status;
       out.reason = out.blocked
-        ? `HTTP ${r.status} (real browser — hard wall, not a solvable challenge)`
+        ? body1.challenge
+          ? `HTTP ${r.status} (${body1.reason}) — interactive challenge, but no visible fallback (visiblePollMs=0)`
+          : `HTTP ${r.status} (real browser — hard wall, not a solvable challenge)`
         : `HTTP ${r.status} (real browser)`;
       out.content = r.html.slice(0, 300);
       return out;
@@ -159,7 +169,9 @@ export async function browseOne(
 
     const deadline = Date.now() + bc.visiblePollMs;
     while (Date.now() < deadline && !userClosed) {
-      if (!detectWall({ status: r.status, text: r.html }).blocked) break;
+      // body-only check: r.status is still the initial goto's (often the
+      // challenge's 403) even after the user has cleared the challenge
+      if (!wallFromBody(r.html).blocked) break;
       await new Promise((res) => setTimeout(res, 2000));
       if (userClosed) break;
       try {
@@ -170,7 +182,7 @@ export async function browseOne(
         break; // page destroyed
       }
     }
-    out.challengeCleared = !userClosed && !detectWall({ status: r.status, text: r.html }).blocked;
+    out.challengeCleared = !userClosed && !wallFromBody(r.html).blocked;
     if (!out.challengeCleared) {
       out.blocked = true;
       out.kind = "blocked";
@@ -182,7 +194,10 @@ export async function browseOne(
       out.content = r.html.slice(0, 300);
       return out;
     }
-    await finish(out, r, opts.raw === true);
+    // synthetic 200: the effective fetch succeeded; the challenge journey is
+    // documented by stage=2 + challengeCleared (finish() checks the wall by
+    // status first, which would be poisoned by the stale 403)
+    await finish(out, { status: 200, html: r.html, finalUrl: r.finalUrl }, opts.raw === true);
     return out;
   } catch (err) {
     out.reason = `browse failed: ${err instanceof Error ? err.message : String(err)}`;

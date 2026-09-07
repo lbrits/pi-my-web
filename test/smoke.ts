@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { loadConfig } from "../src/config.ts";
 import { searchAll, applyDomainFilter } from "../src/search.ts";
 import { fetchAll, formatFetchResults } from "../src/fetcher.ts";
-import { detectWall } from "../src/walls.ts";
+import { detectWall, wallFromBody } from "../src/walls.ts";
 import { isScihubHost, scihubFollowUrl } from "../src/adapters/scihub.ts";
 import {
   buildOverview,
@@ -68,17 +68,26 @@ try {
 } catch { /* keep 1px */ }
 localFiles["/test.png"] = { path: "-", type: "image/png" };
 
-// short challenge-looking page for the browse wall test (detectWall requires <4 KB)
-const localPages: Record<string, string> = {
-  "/wall":
-    "<html><head><title>Checking</title></head><body><h1>Just a moment...</h1><p>Checking your browser before accessing.</p></body></html>",
+// short challenge-looking pages for the browse wall test (detectWall requires <4 KB)
+const localPages: Record<string, { status?: number; html: string }> = {
+  "/wall": {
+    html:
+      "<html><head><title>Checking</title></head><body><h1>Just a moment...</h1><p>Checking your browser before accessing.</p></body></html>",
+  },
+  // Cloudflare-style: interactive challenge served with 403
+  "/wall403": {
+    status: 403,
+    html:
+      "<html><head><title>Just a moment...</title></head><body><h1>Just a moment...</h1><p>Checking your browser before accessing the site.</p></body></html>",
+  },
 };
 
 const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
   const u = req.url ?? "";
   if (localPages[u]) {
-    res.writeHead(200, { "content-type": "text/html" });
-    res.end(localPages[u]);
+    const p = localPages[u];
+    res.writeHead(p.status ?? 200, { "content-type": "text/html" });
+    res.end(p.html);
     return;
   }
   const f = localFiles[u];
@@ -158,6 +167,25 @@ if (localFiles["/car.pdf"]) {
     o2.ok === false && o2.blocked === true && o2.stage === 1 && /no visible fallback/.test(o2.reason ?? ""),
     o2.reason,
   );
+  // 403 + interactive challenge body, visiblePollMs=0 → blocked at stage 1, no escalation
+  const o3 = await browse(bcfg, `http://127.0.0.1:${lport}/wall403`, {});
+  check(
+    "browse: 403 challenge, visiblePollMs=0 → no escalation",
+    o3.ok === false && o3.blocked === true && o3.stage === 1 && /no visible fallback/.test(o3.reason ?? ""),
+    o3.reason,
+  );
+  // 403 + interactive challenge body, visible enabled → escalates to stage 2
+  // (a real visible Firefox window opens for ~2 s during this test)
+  const o4 = await browse(
+    { ...bcfg, browse: { ...bcfg.browse, visiblePollMs: 1500 } },
+    `http://127.0.0.1:${lport}/wall403`,
+    {},
+  );
+  check(
+    "browse: 403 challenge → escalates to visible stage 2",
+    o4.ok === false && o4.blocked === true && o4.stage === 2 && /not cleared within/.test(o4.reason ?? ""),
+    `stage=${o4.stage} ${o4.reason}`,
+  );
 }
 
 server.close();
@@ -173,6 +201,17 @@ server.close();
   const altcha = `<html><head>${css}</head><body><h1>Are you a robot?</h1><p>No</p></body></html>`;
   check("wall: CSS-bloated challenge blocked", detectWall({ status: 200, text: altcha }).blocked === true);
   check("wall: CSS-bloated normal page not a wall", detectWall({ status: 200, text: `<html><head>${css}</head><body>normal article text</body></html>` }).blocked === false);
+  // status-agnostic body classification (2026-09-07 hardening)
+  check("wall: 403 + challenge body → reason enriched", /browser check/.test(detectWall({ status: 403, text: "<html><body>Just a moment... Checking your browser</body></html>" }).reason ?? ""));
+  check(
+    "wall: 'just a moment' body is an interactive challenge",
+    (() => { const w = wallFromBody("<html><body>Just a moment...</body></html>"); return w.blocked === true && w.challenge === true; })(),
+  );
+  check(
+    "wall: 'access denied' body blocked but not a challenge",
+    (() => { const w = wallFromBody("<html><body>Access Denied</body></html>"); return w.blocked === true && w.challenge === false; })(),
+  );
+  check("wall: long real page not a wall (body-only)", wallFromBody("x".repeat(5000)).blocked === false);
 }
 
 // --- overview (Phase D, offline units) ---
