@@ -14,14 +14,32 @@ backend-agnostic tools.
   detection with structured `blocked` results, and site adapters
   (`src/adapters/`, one little .ts per site) that auto-follow interstitial
   pages to the real document (currently: Sci-Hub paper page → PDF).
+- **web_browse** — wall-breaker: renders the URL in a real Firefox (Playwright,
+  persistent per-user profile). Headless first; if a bot challenge is still up,
+  relaunches with a **visible** window and waits up to 2 min for the user to
+  clear it, then re-reads the page. Same result shape as `web_fetch`.
+  Use when `web_fetch` comes back `blocked`.
 
 ## Setup
 ```bash
 npm install
 ln -s /path/to/pi-my-web ~/.pi/agent/extensions/pi-my-web   # or copy
 ```
-Optional per-user config: `~/.pi/agent/pi-my-web.json` (see PLAN.md for the
-schema; defaults include a local SearXNG backend).
+
+`web_fetch` works immediately. Two optional extras:
+
+- **web_browse (bot walls)** needs a browser, one time (~110 MB, no root):
+  `npx playwright-core install firefox`. It downloads Playwright's own
+  Firefox build (stock/LibreWolf Firefox can't be driven) into
+  `~/.cache/ms-playwright/`; the persistent profile lives at
+  `~/.pi/agent/pi-my-web-browse/`.
+- **web_search** needs a SearXNG instance. The built-in default points at the
+  author's LAN copy — set `search.backends` in the config to your own
+  (the official Docker image serves the `format=json` API out of the box):
+  `docker run -d -p 8080:8080 searxng/searxng:latest`
+
+Per-user config: `~/.pi/agent/pi-my-web.json` (or `$PI_MY_WEB_CONFIG`); see
+PLAN.md for the schema.
 
 ## Logging & health report
 Both tools log every outcome (JSONL) so failures are visible without reading
