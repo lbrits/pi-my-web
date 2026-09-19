@@ -9,6 +9,9 @@ backend-agnostic tools.
 ## Tools
 - **web_search** — SearXNG-backed (config lists backends, tried in order with
   automatic fallback). Parallel multi-query, recency + domain filters.
+  **SearXNG is the first-class backend today** — it's the only implemented
+  search adapter; the search layer is adapter-based (one small function per
+  engine), so other engines are a planned add-on, not a rewrite.
 - **web_fetch** — HTML→readability→markdown, PDF→pdfjs text, images returned
   as image attachments, long content offloaded to a temp file, bot-wall
   detection with structured `blocked` results, and site adapters
