@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
   "description": "Slim web-access extension for pi: SearXNG-backed web_search + readability web_fetch (replaces npm:pi-web-access)",
   "pi": {
     "extensions": [

@@ -21,22 +21,32 @@ backend-agnostic tools.
   Use when `web_fetch` comes back `blocked`.
 
 ## Setup
+**Usual way — install as a pi package** (pi clones the repo and runs
+`npm install` for you; ref-pinned, updated via `pi update --extensions`):
 ```bash
-npm install
-ln -s /path/to/pi-my-web ~/.pi/agent/extensions/pi-my-web   # or copy
+pi install git:github.com/lbrits/pi-my-web
 ```
-
-`web_fetch` works immediately. Two optional extras:
+Then start pi (or `/reload`). `web_fetch` works immediately. Two optional
+extras:
 
 - **web_browse (bot walls)** needs a browser, one time (~110 MB, no root):
-  `npx playwright-core install firefox`. It downloads Playwright's own
-  Firefox build (stock/LibreWolf Firefox can't be driven) into
+  `npx playwright-core install firefox` (run inside the package directory,
+  e.g. `~/.pi/agent/git/github.com/lbrits/pi-my-web`; or from anywhere:
+  `npx -p playwright-core playwright-core install firefox`). It downloads
+  Playwright's own Firefox build (stock/LibreWolf can't be driven) into
   `~/.cache/ms-playwright/`; the persistent profile lives at
   `~/.pi/agent/pi-my-web-browse/`.
 - **web_search** needs a SearXNG instance. The built-in default points at the
   author's LAN copy — set `search.backends` in the config to your own
   (the official Docker image serves the `format=json` API out of the box):
   `docker run -d -p 8080:8080 searxng/searxng:latest`
+
+**Dev install** (editable local checkout):
+```bash
+git clone https://github.com/lbrits/pi-my-web && cd pi-my-web
+npm install
+ln -s $PWD ~/.pi/agent/extensions/pi-my-web
+```
 
 Per-user config: `~/.pi/agent/pi-my-web.json` (or `$PI_MY_WEB_CONFIG`); see
 PLAN.md for the schema.
